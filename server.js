@@ -1,6 +1,6 @@
-const express = require('express');
-const axios = require('axios');
-const cors = require('cors');
+import express from 'express';
+import cors from 'cors';
+import axios from 'axios';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -33,3 +33,4 @@ app.get('/api/price-history', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
