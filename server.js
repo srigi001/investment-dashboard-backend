@@ -25,8 +25,8 @@ app.get('/api/price-history', async (req, res) => {
       .filter(Boolean);
     res.json({ symbol, prices });
   } catch (err) {
-    console.error(err.message);
-    res.status(500).json({ error: 'Failed to fetch data' });
+  console.error('EOD API error:', err.response?.data || err.message || err);
+  res.status(500).json({ error: 'Failed to fetch data' });
   }
 });
 
