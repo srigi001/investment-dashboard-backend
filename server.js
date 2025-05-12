@@ -11,10 +11,11 @@ app.post('/api/montecarlo', (req, res) => {
     if (!allocations.length) return res.status(400).json({ error: 'No allocations provided' });
 
     const totalMonths = years * 12;
-    const snapshotsPerMonth = Array.from({ length: totalMonths + 1 }, () => []);
+    const allPaths = [];
 
     for (let i = 0; i < cycles; i++) {
-      let portfolioValue = 0;
+      let path = [];
+      let value = 0;
       let monthlyAmount = 0;
 
       for (let month = 0; month <= totalMonths; month++) {
@@ -22,54 +23,51 @@ app.post('/api/montecarlo', (req, res) => {
         currentDate.setMonth(currentDate.getMonth() + month);
         const dateStr = currentDate.toISOString().slice(0, 10);
 
-        // Update monthly deposit amount if changed by this date
         monthlyChanges.forEach((change) => {
           if (change.date <= dateStr) monthlyAmount = change.amount;
         });
 
-        // Apply one-time deposits for this date
         oneTimeDeposits.forEach((deposit) => {
-          if (deposit.date === dateStr) portfolioValue += deposit.amount;
+          if (deposit.date === dateStr) value += deposit.amount;
         });
 
-        // Apply recurring monthly deposit
-        portfolioValue += monthlyAmount;
+        value += monthlyAmount;
 
-        // Apply returns for this month
         allocations.forEach((asset) => {
           const monthlyReturn = (asset.cagr / 12) + (randn_bm() * (asset.volatility / Math.sqrt(12)));
-          portfolioValue *= 1 + (monthlyReturn * (asset.allocation / 100));
+          value *= 1 + (monthlyReturn * (asset.allocation / 100));
         });
 
-        // Save snapshot at this month
-        snapshotsPerMonth[month].push(portfolioValue);
+        path.push(value);
       }
+
+      allPaths.push(path);
     }
 
-    const result = snapshotsPerMonth.map((monthValues, month) => {
-      monthValues.sort((a, b) => a - b);
+    // Aggregate across paths
+    const aggregated = [];
+    for (let month = 0; month <= totalMonths; month++) {
+      const monthValues = allPaths.map((path) => path[month]).sort((a, b) => a - b);
       const mean = monthValues.reduce((sum, v) => sum + v, 0) / monthValues.length;
       const median = monthValues[Math.floor(monthValues.length / 2)];
       const p10 = monthValues[Math.floor(monthValues.length * 0.1)];
       const p90 = monthValues[Math.floor(monthValues.length * 0.9)];
-
-      return {
+      aggregated.push({
         month,
         mean,
         median,
         p10,
         p90
-      };
-    });
+      });
+    }
 
     res.json({
-      months: result.map((r) => r.month),
-      mean: result.map((r) => Math.round(r.mean)),
-      median: result.map((r) => Math.round(r.median)),
-      p10: result.map((r) => Math.round(r.p10)),
-      p90: result.map((r) => Math.round(r.p90))
+      months: aggregated.map((r) => r.month),
+      mean: aggregated.map((r) => Math.round(r.mean)),
+      median: aggregated.map((r) => Math.round(r.median)),
+      p10: aggregated.map((r) => Math.round(r.p10)),
+      p90: aggregated.map((r) => Math.round(r.p90))
     });
-
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Simulation error' });
