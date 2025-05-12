@@ -8,57 +8,53 @@ app.use(express.json());
 app.post('/api/montecarlo', (req, res) => {
   try {
     const { allocations, oneTimeDeposits, monthlyChanges, cycles, years } = req.body;
-
     if (!allocations.length) return res.status(400).json({ error: 'No allocations provided' });
 
-    const monthlyYears = years * 12;
-    const resultsPerYear = Array.from({ length: years + 1 }, () => []);
+    const totalMonths = years * 12;
+    const snapshotsPerMonth = Array.from({ length: totalMonths + 1 }, () => []);
 
     for (let i = 0; i < cycles; i++) {
-      let portfolioValue = 100000;
+      let portfolioValue = 0;
       let monthlyAmount = 0;
 
-      // Track portfolio value at start of year 0
-      resultsPerYear[0].push(portfolioValue);
-
-      for (let month = 1; month <= monthlyYears; month++) {
+      for (let month = 0; month <= totalMonths; month++) {
         const currentDate = new Date(2025, 0, 1);
-        currentDate.setMonth(currentDate.getMonth() + month - 1);
-
+        currentDate.setMonth(currentDate.getMonth() + month);
         const dateStr = currentDate.toISOString().slice(0, 10);
 
+        // Update monthly deposit amount if changed by this date
         monthlyChanges.forEach((change) => {
           if (change.date <= dateStr) monthlyAmount = change.amount;
         });
 
-        portfolioValue += monthlyAmount;
-
+        // Apply one-time deposits for this date
         oneTimeDeposits.forEach((deposit) => {
           if (deposit.date === dateStr) portfolioValue += deposit.amount;
         });
 
+        // Apply recurring monthly deposit
+        portfolioValue += monthlyAmount;
+
+        // Apply returns for this month
         allocations.forEach((asset) => {
           const monthlyReturn = (asset.cagr / 12) + (randn_bm() * (asset.volatility / Math.sqrt(12)));
           portfolioValue *= 1 + (monthlyReturn * (asset.allocation / 100));
         });
 
-        // At end of each year, snapshot
-        if (month % 12 === 0) {
-          const yearIndex = month / 12;
-          resultsPerYear[yearIndex].push(portfolioValue);
-        }
+        // Save snapshot at this month
+        snapshotsPerMonth[month].push(portfolioValue);
       }
     }
 
-    const result = resultsPerYear.map((yearValues, year) => {
-      yearValues.sort((a, b) => a - b);
-      const mean = yearValues.reduce((sum, v) => sum + v, 0) / yearValues.length;
-      const median = yearValues[Math.floor(yearValues.length / 2)];
-      const p10 = yearValues[Math.floor(yearValues.length * 0.1)];
-      const p90 = yearValues[Math.floor(yearValues.length * 0.9)];
+    const result = snapshotsPerMonth.map((monthValues, month) => {
+      monthValues.sort((a, b) => a - b);
+      const mean = monthValues.reduce((sum, v) => sum + v, 0) / monthValues.length;
+      const median = monthValues[Math.floor(monthValues.length / 2)];
+      const p10 = monthValues[Math.floor(monthValues.length * 0.1)];
+      const p90 = monthValues[Math.floor(monthValues.length * 0.9)];
 
       return {
-        year,
+        month,
         mean,
         median,
         p10,
@@ -67,7 +63,7 @@ app.post('/api/montecarlo', (req, res) => {
     });
 
     res.json({
-      years: result.map((r) => r.year),
+      months: result.map((r) => r.month),
       mean: result.map((r) => Math.round(r.mean)),
       median: result.map((r) => Math.round(r.median)),
       p10: result.map((r) => Math.round(r.p10)),
