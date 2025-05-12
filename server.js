@@ -5,12 +5,27 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.post('/api/montecarlo', (req, res) => {
+app.post('/api/simulate', (req, res) => {
   try {
-    const { allocations, oneTimeDeposits, monthlyChanges, cycles, years } = req.body;
-    if (!allocations.length) return res.status(400).json({ error: 'No allocations provided' });
-
+    const { allocations, oneTimeDeposits, monthlyChanges } = req.body;
+    const cycles = 15000;
+    const years = 15;
     const totalMonths = years * 12;
+
+    if (!allocations.length) {
+      return res.status(400).json({ error: 'No allocations provided' });
+    }
+
+    // Normalize allocations
+    const allocationSum = allocations.reduce((sum, a) => sum + a.allocation, 0);
+    if (allocationSum === 0) {
+      return res.status(400).json({ error: 'Allocations sum to 0' });
+    }
+    const normalizedAllocations = allocations.map((a) => ({
+      ...a,
+      weight: a.allocation / allocationSum,
+    }));
+
     const allPaths = [];
 
     for (let i = 0; i < cycles; i++) {
@@ -23,50 +38,60 @@ app.post('/api/montecarlo', (req, res) => {
         currentDate.setMonth(currentDate.getMonth() + month);
         const dateStr = currentDate.toISOString().slice(0, 10);
 
+        // Monthly changes
         monthlyChanges.forEach((change) => {
           if (change.date <= dateStr) monthlyAmount = change.amount;
         });
 
+        // One-time deposits
         oneTimeDeposits.forEach((deposit) => {
           if (deposit.date === dateStr) value += deposit.amount;
         });
 
+        // Add monthly deposit
         value += monthlyAmount;
 
-        allocations.forEach((asset) => {
-          const monthlyReturn = (asset.cagr / 12) + (randn_bm() * (asset.volatility / Math.sqrt(12)));
-          value *= 1 + (monthlyReturn * (asset.allocation / 100));
-        });
+        // If no money yet, skip return simulation (avoid multiplying zero)
+        if (value === 0) {
+          path.push(0);
+          continue;
+        }
 
+        // Apply returns for each asset
+        let totalGrowth = 0;
+        normalizedAllocations.forEach((asset) => {
+          const monthlyReturn = (asset.cagr / 12) + (randn_bm() * (asset.volatility / Math.sqrt(12)));
+          totalGrowth += monthlyReturn * asset.weight;
+        });
+        value *= 1 + totalGrowth;
         path.push(value);
       }
 
       allPaths.push(path);
     }
 
-    // Aggregate across paths
+    // Aggregate stats
     const aggregated = [];
     for (let month = 0; month <= totalMonths; month++) {
-      const monthValues = allPaths.map((path) => path[month]).sort((a, b) => a - b);
-      const mean = monthValues.reduce((sum, v) => sum + v, 0) / monthValues.length;
-      const median = monthValues[Math.floor(monthValues.length / 2)];
-      const p10 = monthValues[Math.floor(monthValues.length * 0.1)];
-      const p90 = monthValues[Math.floor(monthValues.length * 0.9)];
+      const values = allPaths.map((path) => path[month]).sort((a, b) => a - b);
+      const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+      const median = values[Math.floor(values.length / 2)];
+      const p10 = values[Math.floor(values.length * 0.1)];
+      const p90 = values[Math.floor(values.length * 0.9)];
       aggregated.push({
         month,
         mean,
         median,
-        p10,
-        p90
+        percentile10: p10,
+        percentile90: p90,
       });
     }
 
     res.json({
-      months: aggregated.map((r) => r.month),
       mean: aggregated.map((r) => Math.round(r.mean)),
       median: aggregated.map((r) => Math.round(r.median)),
-      p10: aggregated.map((r) => Math.round(r.p10)),
-      p90: aggregated.map((r) => Math.round(r.p90))
+      percentile10: aggregated.map((r) => Math.round(r.percentile10)),
+      percentile90: aggregated.map((r) => Math.round(r.percentile90)),
     });
   } catch (e) {
     console.error(e);
