@@ -12,15 +12,18 @@ app.post('/api/montecarlo', (req, res) => {
     if (!allocations.length) return res.status(400).json({ error: 'No allocations provided' });
 
     const monthlyYears = years * 12;
-    const yearlySnapshots = Array.from({ length: years + 1 }, () => []);
+    const resultsPerYear = Array.from({ length: years + 1 }, () => []);
 
     for (let i = 0; i < cycles; i++) {
       let portfolioValue = 100000;
       let monthlyAmount = 0;
 
-      for (let month = 0; month <= monthlyYears; month++) {
+      // Track portfolio value at start of year 0
+      resultsPerYear[0].push(portfolioValue);
+
+      for (let month = 1; month <= monthlyYears; month++) {
         const currentDate = new Date(2025, 0, 1);
-        currentDate.setMonth(currentDate.getMonth() + month);
+        currentDate.setMonth(currentDate.getMonth() + month - 1);
 
         const dateStr = currentDate.toISOString().slice(0, 10);
 
@@ -39,15 +42,15 @@ app.post('/api/montecarlo', (req, res) => {
           portfolioValue *= 1 + (monthlyReturn * (asset.allocation / 100));
         });
 
-        // At the end of each year (including start at month 0)
+        // At end of each year, snapshot
         if (month % 12 === 0) {
           const yearIndex = month / 12;
-          yearlySnapshots[yearIndex].push(portfolioValue);
+          resultsPerYear[yearIndex].push(portfolioValue);
         }
       }
     }
 
-    const result = yearlySnapshots.map((yearValues, year) => {
+    const result = resultsPerYear.map((yearValues, year) => {
       yearValues.sort((a, b) => a - b);
       const mean = yearValues.reduce((sum, v) => sum + v, 0) / yearValues.length;
       const median = yearValues[Math.floor(yearValues.length / 2)];
