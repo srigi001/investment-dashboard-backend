@@ -7,59 +7,48 @@ app.use(express.json());
 
 app.post('/api/simulate', (req, res) => {
   try {
-    const { allocations, oneTimeDeposits, monthlyChanges, cycles = 15000, years = 15 } = req.body;
+    const { allocations, oneTimeDeposits, monthlyChanges, cycles = 15000 } = req.body;
     if (!allocations.length) return res.status(400).json({ error: 'No allocations provided' });
 
-    const totalMonths = years * 12;
-    const allPaths = [];
+    // Find the earliest deposit date across all deposits (one-time and monthly change schedules)
+    const allDates = [
+      ...oneTimeDeposits.map((d) => d.date),
+      ...monthlyChanges.map((d) => d.date),
+    ].filter(Boolean);
 
-    // Detect earliest deposit date (one-time or monthly change)
-    const earliestOneTime = oneTimeDeposits.length
-      ? oneTimeDeposits.reduce((min, d) => (d.date < min ? d.date : min), oneTimeDeposits[0].date)
-      : null;
-    const earliestMonthly = monthlyChanges.length
-      ? monthlyChanges.reduce((min, d) => (d.date < min ? d.date : min), monthlyChanges[0].date)
-      : null;
-    const earliestDate = [earliestOneTime, earliestMonthly].filter(Boolean).sort()[0];
+    if (!allDates.length) return res.status(400).json({ error: 'No deposits found' });
+
+    const earliestDateStr = allDates.sort()[0];
+    const earliestDate = new Date(earliestDateStr);
+    const startYear = earliestDate.getFullYear();
+    const startMonth = earliestDate.getMonth();
+    const totalMonths = 180;
+
+    const allPaths = [];
 
     for (let i = 0; i < cycles; i++) {
       let path = [];
       let value = 0;
       let monthlyAmount = 0;
-      let depositAdded = false;
 
       for (let month = 0; month <= totalMonths; month++) {
-        const currentDate = new Date(2025, 0, 1);
-        currentDate.setMonth(currentDate.getMonth() + month);
+        const currentDate = new Date(startYear, startMonth + month, 1);
         const dateStr = currentDate.toISOString().slice(0, 10);
 
-        // Monthly deposit changes
+        // Monthly deposits update
         monthlyChanges.forEach((change) => {
           if (change.date <= dateStr) monthlyAmount = change.amount;
         });
 
-        // One-time deposits (trigger only once per deposit date)
+        // One-time deposits on the exact date
         oneTimeDeposits.forEach((deposit) => {
-          if (deposit.date === dateStr) {
-            value += deposit.amount;
-            depositAdded = true;
-          }
+          if (deposit.date === dateStr) value += deposit.amount;
         });
 
-        // For safety: If the earliest deposit date has passed but no deposit happened yet, add it
-        if (!depositAdded && earliestDate && dateStr >= earliestDate) {
-          oneTimeDeposits
-            .filter((d) => d.date === earliestDate)
-            .forEach((d) => {
-              value += d.amount;
-            });
-          depositAdded = true;
-        }
-
-        // Add monthly deposit
+        // Apply monthly deposit
         value += monthlyAmount;
 
-        // Apply returns only if value > 0
+        // Apply returns only if capital exists
         if (value > 0) {
           allocations.forEach((asset) => {
             const monthlyReturn =
@@ -97,6 +86,7 @@ app.post('/api/simulate', (req, res) => {
       median: aggregated.map((r) => Math.round(r.median)),
       percentile10: aggregated.map((r) => Math.round(r.p10)),
       percentile90: aggregated.map((r) => Math.round(r.p90)),
+      simulationStartDate: earliestDateStr, // (optional) return for front-end info
     });
   } catch (e) {
     console.error(e);
