@@ -49,13 +49,17 @@ app.post('/api/simulate', (req, res) => {
         // Apply monthly deposits
         if (monthlyAmount > 0) value += monthlyAmount;
 
-        // Apply asset returns if value > 0
-        if (value > 0) {
+        // Store current value before compounding
+        let baseValue = value;
+
+        // Apply asset returns on previous value (start from month 1)
+        if (month > 0 && baseValue > 0) {
           allocations.forEach((asset) => {
             const monthlyReturn =
               asset.cagr / 12 + randn_bm() * (asset.volatility / Math.sqrt(12));
-            value *= 1 + monthlyReturn * (asset.allocation / 100);
+            baseValue *= 1 + monthlyReturn * (asset.allocation / 100);
           });
+          value = baseValue;
         }
 
         path.push(value);
