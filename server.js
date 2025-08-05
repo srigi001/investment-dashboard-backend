@@ -1,18 +1,52 @@
+// Updated server.js for Render deployment
+
 import express from 'express';
 import cors from 'cors';
 import { google } from 'googleapis';
 
-// Google Sheets API setup
-const auth = new google.auth.GoogleAuth({
-  keyFile: './google-credentials.json',
-  scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
-});
+const app = express();
+app.use(cors());
+app.use(express.json());
 
-const sheets = google.sheets({ version: 'v4', auth });
+// Google Sheets API setup with environment variable support
+let sheets = null;
 
-// Add this endpoint
+try {
+  // Try to use environment variables first (for Render deployment)
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY) {
+    const auth = new google.auth.GoogleAuth({
+      credentials: {
+        client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+        private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      },
+      scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    });
+    sheets = google.sheets({ version: 'v4', auth });
+    console.log('✅ Google Sheets API initialized with environment variables');
+  } else {
+    // Fallback to key file (for local development)
+    const auth = new google.auth.GoogleAuth({
+      keyFile: './google-credentials.json',
+      scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    });
+    sheets = google.sheets({ version: 'v4', auth });
+    console.log('✅ Google Sheets API initialized with key file');
+  }
+} catch (error) {
+  console.warn('⚠️ Google Sheets API not available:', error.message);
+  sheets = null;
+}
+
+// Google Sheets endpoint
 app.post('/api/google-sheets', async (req, res) => {
   try {
+    if (!sheets) {
+      return res.status(500).json({ 
+        error: 'Google Sheets API not configured',
+        details: 'Please set up Google service account credentials'
+      });
+    }
+
     const { spreadsheetId, range = 'Sheet1!A:Z' } = req.body;
 
     if (!spreadsheetId) {
@@ -45,11 +79,7 @@ app.post('/api/google-sheets', async (req, res) => {
   }
 });
 
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
+// Your existing simulation endpoint
 app.post('/api/simulate', (req, res) => {
   try {
     const { allocations, oneTimeDeposits, monthlyChanges, cycles = 15000, years = 15 } = req.body;
@@ -155,4 +185,4 @@ function randn_bm() {
 const port = process.env.PORT || 3001;
 app.listen(port, () => {
   console.log(`✅ Server running on port ${port}`);
-});
+}); 
