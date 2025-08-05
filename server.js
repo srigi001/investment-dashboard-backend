@@ -1,5 +1,50 @@
 import express from 'express';
 import cors from 'cors';
+import { google } from 'googleapis';
+
+// Google Sheets API setup
+const auth = new google.auth.GoogleAuth({
+  keyFile: './google-credentials.json',
+  scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+});
+
+const sheets = google.sheets({ version: 'v4', auth });
+
+// Add this endpoint
+app.post('/api/google-sheets', async (req, res) => {
+  try {
+    const { spreadsheetId, range = 'Sheet1!A:Z' } = req.body;
+
+    if (!spreadsheetId) {
+      return res.status(400).json({ error: 'Spreadsheet ID is required' });
+    }
+
+    console.log(`📊 Fetching Google Sheets data: ${spreadsheetId}, range: ${range}`);
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range,
+    });
+
+    const rows = response.data.values || [];
+    console.log(`✅ Retrieved ${rows.length} rows from Google Sheets`);
+
+    res.json({
+      success: true,
+      rows,
+      spreadsheetId,
+      range
+    });
+
+  } catch (error) {
+    console.error('❌ Google Sheets API error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch Google Sheets data',
+      details: error.message 
+    });
+  }
+});
+
 
 const app = express();
 app.use(cors());
